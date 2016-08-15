@@ -51,7 +51,7 @@ def init_config():
             print("Command line arguments are deprecated. See README for details.")
             print("Usage: pokecli.py [path to config.yml]")
             exit(1)
-        config_path = sys.argv[2]
+        config_path = sys.argv[1]
 
     if not os.path.isfile(config_path):
         print("{} does not exist.".format(config_path))
