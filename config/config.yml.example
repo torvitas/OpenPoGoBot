@@ -37,6 +37,10 @@ mapping:
     # Specify what units for distance the bot should use
     distance_unit: "km"
 
+    # The radius (in meters) to fetch cell data for. Cell data includes pokestops and nearby pokemon
+    # Max value is 1500
+    cell_radius: 500
+
 movement:
     # Use Google Maps Direction API (google) or just walk directly (direct)
     path_finder: "google"
@@ -58,11 +62,13 @@ movement:
 
 plugins:
     # Do not automatically load the specified plugins
-    exclude:
-        - web
+    exclude: []
 
-    # Load plugins that are not in the plugins/ folder
-    include: []
+    # Plugin directories to load
+    include:
+        - ./plugins
 
-    # Load plugin YAML config files from this folder
-    config: "config/plugins"
+    # Load plugin YAML config files from these directories, relative to the main config file directory.
+    # Later directories will override configs in previous directories.
+    config:
+        - "plugins"

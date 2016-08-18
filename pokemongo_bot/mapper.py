@@ -1,30 +1,29 @@
 # -*- coding: utf-8 -*-
 
-from math import ceil
 import json
 
+from googlemaps.exceptions import ApiError
 from s2sphere import CellId, LatLng  # type: ignore
-from pokemongo_bot.human_behaviour import sleep, random_lat_long_delta
-from pokemongo_bot.utils import distance, format_time
-from pokemongo_bot.navigation import FortNavigator
-import pokemongo_bot.logger as logger
+from pgoapi.utilities import get_cell_ids
+
+from app import kernel
+from pokemongo_bot.utils import distance
 
 
-# Uncomment to enable type annotations for Python 3
-# from typing import Optional, List
-
-
+@kernel.container.register('mapper', ['@config.core', '@api_wrapper', '@google_maps', '@logger'])
 class Mapper(object):
-    def __init__(self, bot):
-        # type: (PokemonGoBot) -> None
-        self.bot = bot
-        self.stepper = bot.stepper
-        self.api_wrapper = bot.api_wrapper
-        self.config = bot.config
+    def __init__(self, config, api_wrapper, google_maps, logger):
+        # type: (Namespace, PoGoApi, Client) -> None
+        self.config = config
+        self.api_wrapper = api_wrapper
+        self.google_maps = google_maps
+        self.logger = logger
 
     def get_cells(self, lat, lng):
         # type: (float, float) -> List[Cell]
-        cell_id = self._get_cell_id_from_latlong()
+        cell_id = self._get_cell_id_from_latlong(
+            self.config['mapping']['cell_radius']
+        )
         timestamp = [0, ] * len(cell_id)
         self.api_wrapper.get_map_objects(latitude=lat,
                                          longitude=lng,
@@ -49,25 +48,49 @@ class Mapper(object):
 
         return map_cells
 
-    def get_cells_at_current_position(self):
-        # type: () -> List[Cell]
-        return self.get_cells(
-            self.stepper.current_lat,
-            self.stepper.current_lng
-        )
+    def find_location(self, location):
+        # type: (str) -> Tuple[float, float, float]
 
-    def _get_cell_id_from_latlong(self, radius=10):
+        # If we have been given a string of coordinates
+        if location.count(',') == 1:
+            try:
+                parts = location.split(',')
+
+                pos_lat = float(parts[0])
+                pos_lng = float(parts[1])
+
+                # we need to ask google for the altitude
+                response = self.google_maps.elevation((pos_lat, pos_lng))
+
+                if response is not None and len(response) and "elevation" in response[0]:
+                    return pos_lat, pos_lng, response[0]["elevation"]
+                else:
+                    raise ValueError
+            except ApiError:
+                self._log("Could not fetch altitude from google. Trying geolocator.", color='yellow')
+            except ValueError:
+                self._log("Location was not Lat/Lng. Trying geolocator.", color='yellow')
+
+        # Fallback to geolocation if no Lat/Lng can be found
+        loc = self.google_maps.geocode(location)
+
+        return loc.latitude, loc.longitude, loc.altitude
+
+    def _log(self, text, color='black'):
+        self.logger.log(text, color=color, prefix='Mapper')
+
+    def _get_cell_id_from_latlong(self, radius=1000):
         # type: (Optional[int]) -> List[str]
         position_lat, position_lng, _ = self.api_wrapper.get_position()
-        origin = CellId.from_lat_lng(LatLng.from_degrees(position_lat, position_lng)).parent(15)
-        walk = [origin.id()]
 
-        # 10 before and 10 after
-        next_cell = origin.next()
-        prev_cell = origin.prev()
-        for _ in range(radius):
-            walk.append(prev_cell.id())
-            walk.append(next_cell.id())
-            next_cell = next_cell.next()
-            prev_cell = prev_cell.prev()
-        return sorted(walk)
+        cells = get_cell_ids(position_lat, position_lng, radius)
+
+        if self.config['debug']:
+            self._log('Cells:', color='yellow')
+            self._log('Origin: {},{}'.format(position_lat, position_lng), color='yellow')
+            for cell in cells:
+                cell_id = CellId(cell)
+                lat_lng = cell_id.to_lat_lng()
+                self._log('Cell  : {},{}'.format(lat_lng.lat().degrees, lat_lng.lng().degrees), color='yellow')
+
+        return cells
